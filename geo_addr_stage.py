@@ -1,10 +1,60 @@
 '''geo_addr_stage -- stage address geocoding data from MPC
 
+Log output is a feature to be tested, so log to stdout:
+
+    >>> from sys import stdout
+    >>> logging.basicConfig(level=logging.INFO,
+    ...                     format='%(message)s', stream=stdout)
+
+    >>> import sqlite3
+    >>> db0 = sqlite3.connect(':memory:')
+
+    >>> record = Geocoded.exemplar()._asdict()
+    >>> Geocoded.load(db0, 'geocoded', [record])
+    ... #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    Executing: create table geocoded (
+    ...
+    , X NUMERIC , Y NUMERIC
+    ...
+    , ADDRESS VARCHAR2(128)
+    , CITY VARCHAR2(128) , STATE VARCHAR2(128) , ZIP VARCHAR2(1)
+    ...
+    )
+    With 1 records executing: insert into geocoded
+            (OID,  Join_Count, ...  ST_NAME)
+    values (:OID, :Join_Count, ... :ST_NAME)
+
+Check that the record got inserted correctly:
+
+    >>> c = db0.cursor()
+    >>> c.execute('select * from geocoded') and None
+    >>> c.fetchmany() == [Geocoded.exemplar()]
+    True
+
 '''
 
 from collections import namedtuple
 from xml.etree import ElementTree as ET
+from zipfile import ZipFile
+import csv
+import logging
 import pkg_resources as pkg
+
+log = logging.getLogger(__name__)
+
+
+def main(argv, cwd, connect):
+    [db_label, table_name] = argv[1:3]
+    conn = connect(db_label,
+                   format='%(asctime)-15s %(message)s',
+                   datefmt='%H:%M:%S')
+    zip_name = table_name + '.zip'
+    archive = ZipFile((cwd / zip_name).open(mode='rb'))
+    log.info('loading %s from %s into %s',
+             table_name, zip_name, db_label)
+    data = csv.DictReader(archive.open(table_name + '.txt'))
+    data.next()  # skip header
+    Geocoded.load(conn, table_name, data)
 
 
 class Geocoded(namedtuple(
@@ -29,14 +79,6 @@ class Geocoded(namedtuple(
     ...
     , ST_NAME VARCHAR2(128)
     )
-
-    >>> import sqlite3
-    >>> db0 = sqlite3.connect(':memory:')
-    >>> Geocoded.load(db0, 'geocoded', [Geocoded.exemplar()._asdict()])
-    >>> c = db0.cursor()
-    >>> c.execute('select * from geocoded') and None
-    >>> c.fetchmany() == [Geocoded.exemplar()]
-    True
     '''
     @classmethod
     def exemplar(cls):
@@ -69,12 +111,11 @@ class Geocoded(namedtuple(
     def load(cls, conn, table_name, data,
              chunk_size=1000):
         tdef = cls.sql_def(table_name)
-        cur = conn.cursor()
-        cur.execute(tdef.ddl())
+        tdef.create(conn)
         chunk = []
 
         def flush():
-            conn.executemany(tdef.insert_dml(), chunk)
+            tdef.insert(conn, chunk)
             del chunk[:]
 
         for record in data:
@@ -172,13 +213,72 @@ class StringAttr(GeoAttr,
 
 
 class SQLTable(namedtuple('SQLTable', 'name columns')):
+    # SQLAlchemy is a nice API for this sort of thing,
+    # but so far we're below the amount of code that makes
+    # taking on a dependency worthwhile.
     def ddl(self):
         coldefs = '\n, '.join('%s %s' % (col_name, typespec)
                             for (col_name, typespec) in self.columns)
         return 'create table %s (\n%s\n)' % (self.name, coldefs)
+
+    def create(self, conn):
+        cur = conn.cursor()
+        sql = self.ddl()
+        log.info('Executing: %s', sql)
+        cur.execute(sql)
 
     def insert_dml(self):
         colnames = ', '.join(n for (n, _) in self.columns)
         params = ', '.join(':' + n for (n, _) in self.columns)
         return 'insert into {name} ({colnames}) values ({params})'.format(
             name=self.name, colnames=colnames, params=params)
+
+    def insert(self, conn, records):
+        cur = conn.cursor()
+        sql = self.insert_dml()
+        log.info('inserting %d records into %s...', len(records), self.name)
+        try:
+            ret = cur.executemany(sql, records)
+        except:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        return ret
+
+
+class Path(object):
+    '''Just the parts of the pathlib API that we use.
+    '''
+    def __init__(self, here, ops):
+        io_open, path_join = ops
+        self.joinpath = lambda there: Path(path_join(here, there), ops)
+        self.open = lambda **kwargs: io_open(here, **kwargs)
+        self.path = here
+
+    def __repr__(self):
+        return self.path
+
+    def __div__(self, there):
+        return self.joinpath(there)
+
+
+if __name__ == '__main__':
+    def _script():
+        from io import open as io_open
+        from os.path import join as path_join
+        from sys import argv
+
+        def connect(db_label, format, datefmt):
+            import sqlite3
+
+            logging.basicConfig(level=logging.INFO,
+                                format=format, datefmt=datefmt)
+            # TODO: connect to Oracle
+            return sqlite3.connect(db_label)
+
+        main(argv,
+             cwd=Path('.', (io_open, path_join)),
+             connect=connect)
+
+    _script()
