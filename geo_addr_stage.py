@@ -7,6 +7,88 @@ from xml.etree import ElementTree as ET
 import pkg_resources as pkg
 
 
+class Geocoded(namedtuple(
+        'Geocoded',
+        'OID,Join_Count,TARGET_FID,Loc_name,Status,Score,Match_type,'
+        'X,Y,Match_addr,DISP_LON,DISP_LAT,SIDE,'
+        'ARC_Address,ARC_City,ARC_State,'
+        'ARC_Zip,ADDRESS,CITY,STATE,ZIP,New_X,New_Y,ID,BLOCK_ID,'
+        'FIPSST,FIPSCO,FIPSSTCO,TRACT_ID,ST_ABRV,CO_NAME,ST_NAME')):
+    '''
+
+    >>> print Geocoded.sql_def('t').ddl()
+    ... #doctest: +ELLIPSIS
+    create table t (
+    OID INT
+    , Join_Count INT
+    , TARGET_FID INT
+    , Loc_name VARCHAR2(128)
+    ...
+    , X NUMERIC
+    , Y NUMERIC
+    ...
+    , ST_NAME VARCHAR2(128)
+    )
+
+    >>> import sqlite3
+    >>> db0 = sqlite3.connect(':memory:')
+    >>> Geocoded.load(db0, 'geocoded', [Geocoded.exemplar()._asdict()])
+    >>> c = db0.cursor()
+    >>> c.execute('select * from geocoded') and None
+    >>> c.fetchmany() == [Geocoded.exemplar()]
+    True
+    '''
+    @classmethod
+    def exemplar(cls):
+        return cls(OID=-1, Join_Count=2, TARGET_FID=1228303,
+                   Loc_name='CityState',
+                   Status='M', Score=100, Match_type='A',
+                   X=-94.626819999943, Y=39.11352000044769,
+                   Match_addr='KANSAS CITY, KS',
+                   DISP_LON=None, DISP_LAT=None, SIDE=None,
+                   ARC_Address='3901 KUMC RAINBOW BOULEVARD WE WESCOS',
+                   ARC_City='KANSAS CITY', ARC_State='Kansas', ARC_Zip=None,
+                   ADDRESS='3901 KUMC RAINBOW BOULEVARD WE WESCOS',
+                   CITY='KANSAS CITY', STATE='Kansas', ZIP=None,
+                   New_X=-94.626819999943, New_Y=39.11352000044769,
+                   ID=202090419001002, BLOCK_ID=1002,
+                   FIPSST=20, FIPSCO=209, FIPSSTCO=20209, TRACT_ID='041900',
+                   ST_ABRV='KS', CO_NAME='Wyandotte', ST_NAME='Kansas')
+
+    @classmethod
+    def sql_def(cls, table_name):
+        type_of = lambda x: ('INT' if isinstance(x, int) else
+                             'VARCHAR2(128)' if isinstance(x, str) else
+                             'NUMERIC' if isinstance(x, float) else
+                             'VARCHAR2(1)' if x is None else
+                             _error(ValueError(x)))
+        col_defs = [type_of(x) for x in cls.exemplar()]
+        return SQLTable(table_name, zip(cls._fields, col_defs))
+
+    @classmethod
+    def load(cls, conn, table_name, data,
+             chunk_size=1000):
+        tdef = cls.sql_def(table_name)
+        cur = conn.cursor()
+        cur.execute(tdef.ddl())
+        chunk = []
+
+        def flush():
+            conn.executemany(tdef.insert_dml(), chunk)
+            del chunk[:]
+
+        for record in data:
+            if len(chunk) >= chunk_size:
+                flush()
+            chunk.append(record)
+
+        flush()
+
+
+def _error(x):
+    raise x
+
+
 class Crosswalk(object):
     '''Crosswalk from addresses to census tract etc.
 
@@ -94,3 +176,9 @@ class SQLTable(namedtuple('SQLTable', 'name columns')):
         coldefs = '\n, '.join('%s %s' % (col_name, typespec)
                             for (col_name, typespec) in self.columns)
         return 'create table %s (\n%s\n)' % (self.name, coldefs)
+
+    def insert_dml(self):
+        colnames = ', '.join(n for (n, _) in self.columns)
+        params = ', '.join(':' + n for (n, _) in self.columns)
+        return 'insert into {name} ({colnames}) values ({params})'.format(
+            name=self.name, colnames=colnames, params=params)
