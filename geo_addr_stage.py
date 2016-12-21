@@ -9,9 +9,11 @@ import pkg_resources as pkg
 class Crosswalk(object):
     '''Crosswalk from addresses to census tract etc.
 
-    >>> Crosswalk.from_meta_file(Crosswalk._test_meta())
-    ... #doctest: +ELLIPSIS
-    OID,GSTATE,GCOUNTY,GTRACT,...
+    >>> cx = Crosswalk.from_meta_file(Crosswalk._test_meta())
+    >>> set(['GTRACT', 'GZCTA5', 'GBLOCK']) - set(cx.header())
+    set([])
+    >>> len(cx.header())
+    24
     '''
 
     def __init__(self, metadata):
@@ -25,7 +27,7 @@ class Crosswalk(object):
         return self.header()
 
     def header(self):
-        return ','.join(attr.find('attrlabl').text for attr in self.attrs())
+        return [attr.find('attrlabl').text for attr in self.attrs()]
 
     def attrs(self):
         return self.metadata.findall('./eainfo/detailed/attr')
