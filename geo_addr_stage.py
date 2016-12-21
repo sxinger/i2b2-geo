@@ -52,7 +52,8 @@ def main(argv, cwd, connect):
     archive = ZipFile((cwd / zip_name).open(mode='rb'))
     log.info('loading %s from %s into %s',
              table_name, zip_name, db_label)
-    data = csv.DictReader(archive.open(table_name + '.txt'))
+    data = csv.DictReader(archive.open(table_name + '.txt',
+                                       encoding='utf8'))
     data.next()  # skip header
     Geocoded.load(conn, table_name, data)
 
