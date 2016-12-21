@@ -20,6 +20,15 @@ class Crosswalk(object):
     24
 
     >>> print cx.as_table().ddl()
+    ... #doctest: +ELLIPSIS
+    create table nhgis_Block_2010_wCodes (
+    OID INT
+    , GSTATE VARCHAR2(4)
+    , GCOUNTY VARCHAR2(8)
+    , GTRACT VARCHAR2(14)
+    ...
+    , GCOUSUB_20 VARCHAR2(10)
+    )
     '''
 
     def __init__(self, metadata):
