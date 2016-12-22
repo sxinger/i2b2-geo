@@ -3,8 +3,8 @@
 Log output is a feature to be tested, so log to stdout:
 
     >>> from sys import stdout
-    >>> logging.basicConfig(level=logging.INFO,
-    ...                     format='%(message)s', stream=stdout)
+    >>> logging.basicConfig(stream=stdout,
+    ...                     level=logging.DEBUG, format=TIMELESS)
 
     >>> import sqlite3
     >>> db0 = sqlite3.connect(':memory:')
@@ -12,7 +12,8 @@ Log output is a feature to be tested, so log to stdout:
     >>> record = Geocoded.exemplar()._asdict()
     >>> Geocoded.load(db0, 'geocoded', [record])
     ... #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
-    Executing: create table geocoded (
+    INFO: creating table geocoded with 32 columns
+    DEBUG: Executing: create table geocoded (
     ...
     , X NUMERIC , Y NUMERIC
     ...
@@ -20,9 +21,7 @@ Log output is a feature to be tested, so log to stdout:
     , CITY VARCHAR2(128) , STATE VARCHAR2(128) , ZIP VARCHAR2(1)
     ...
     )
-    With 1 records executing: insert into geocoded
-            (OID,  Join_Count, ...  ST_NAME)
-    values (:OID, :Join_Count, ... :ST_NAME)
+    INFO: inserting 1 records into geocoded...
 
 Check that the record got inserted correctly:
 
@@ -41,21 +40,23 @@ import logging
 import pkg_resources as pkg
 
 log = logging.getLogger(__name__)
+BRIEF = '%(asctime)s %(levelname)s: %(message)s'
+TIME = '%H:%M:%S'
+TIMELESS = '%(levelname)s: %(message)s'
 
 
 def main(argv, cwd, connect):
     [db_label, table_name] = argv[1:3]
-    conn = connect(db_label,
-                   format='%(asctime)-15s %(message)s',
-                   datefmt='%H:%M:%S')
+    conn = connect(db_label, format=BRIEF, datefmt=TIME)
     zip_name = table_name + '.zip'
     archive = ZipFile((cwd / zip_name).open(mode='rb'))
-    log.info('loading %s from %s into %s',
-             table_name, zip_name, db_label)
-    data = csv.DictReader(archive.open(table_name + '.txt',
-                                       encoding='utf8'))
+    log.info('Counting records in %s from %s', table_name + '.txt', zip_name)
+    total = sum(1 for _ in archive.open(table_name + '.txt'))
+    log.info('loading %d records into table %s of DB %s...',
+             total, table_name, db_label)
+    data = UnicodeDictReader(archive.open(table_name + '.txt'), 'utf8')
     data.next()  # skip header
-    Geocoded.load(conn, table_name, data)
+    Geocoded.load(conn, table_name, data, total=total)
 
 
 class Geocoded(namedtuple(
@@ -110,13 +111,19 @@ class Geocoded(namedtuple(
 
     @classmethod
     def load(cls, conn, table_name, data,
-             chunk_size=1000):
+             chunk_size=10000,
+             total=None):
         tdef = cls.sql_def(table_name)
         tdef.create(conn)
         chunk = []
+        subtot = [0]
 
         def flush():
             tdef.insert(conn, chunk)
+            subtot[0] += len(chunk)
+            if total is not None:
+                log.info('%d of %d records (%.1f%%)',
+                         subtot[0], total, 100.0 * subtot[0] / total)
             del chunk[:]
 
         for record in data:
@@ -225,7 +232,9 @@ class SQLTable(namedtuple('SQLTable', 'name columns')):
     def create(self, conn):
         cur = conn.cursor()
         sql = self.ddl()
-        log.info('Executing: %s', sql)
+        log.info('creating table %s with %d columns',
+                 self.name, len(self.columns))
+        log.debug('Executing: %s', sql)
         cur.execute(sql)
 
     def insert_dml(self):
