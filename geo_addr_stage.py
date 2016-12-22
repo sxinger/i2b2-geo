@@ -264,6 +264,13 @@ class Path(object):
         return self.joinpath(there)
 
 
+def UnicodeDictReader(str_data, encoding, **kwargs):
+    # ack: http://stackoverflow.com/a/5483298
+    csv_reader = csv.DictReader(str_data, **kwargs)
+    for row in csv_reader:
+        yield dict((k, v.decode(encoding)) for k, v in row.iteritems())
+
+
 if __name__ == '__main__':
     def _script():
         from io import open as io_open
