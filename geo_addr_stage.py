@@ -293,7 +293,7 @@ if __name__ == '__main__':
             logging.basicConfig(level=logging.INFO,
                                 format=format, datefmt=datefmt)
             db_url = environ[db_label]
-            return create_engine(db_url).connect()
+            return create_engine(db_url).connect().connection
 
         main(argv,
              cwd=Path('.', (io_open, path_join)),
