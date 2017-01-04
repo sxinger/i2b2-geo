@@ -13,15 +13,20 @@ Refs:
 -- https://www.packtpub.com/books/content/creating-external-tables-your-oracle-10g11g-database
 -- CREATE DIRECTORY EXTTABDIR AS '/home/oracle/external_table_dest';
 
+alter session set current_schema = MPC;
 */
 
 
-CREATE DIRECTORY NAACCR_STAGE AS '/d1/naaccr';
-drop directory GEO_CENSUS_STAGE;
-CREATE DIRECTORY GEO_CENSUS_STAGE AS '/d1/geo-census';
 
-drop table acs_fields;
-create table acs_fields (
+
+drop directory GEO_CENSUS_STAGE;
+-- all data files symlinked into the same directory, since
+-- oracle won't descend into subdirectories
+CREATE DIRECTORY GEO_CENSUS_STAGE AS '/d1/geo-census/mn-census-data';
+grant read, write on directory GEO_CENSUS_STAGE to mpc;
+
+drop table MPC.acs_fields;
+create table MPC.acs_fields (
   data_type          varchar2(1),
   dataset_code       varchar2(80),
   table_source_code  varchar2(80),
@@ -62,16 +67,17 @@ organization external (
       appears_in_extracts
     )
   )
-  location ('acs_fields.csv')
+  location ('index_of_data_fields__acs_20135a.csv')
 );
 
 -- select * from acs_fields;
 
 create directory staging_tools as '/d1/geo-census/tools';
+grant read, execute on directory STAGING_TOOLS to mpc;
 
-drop table acs_zcta_200;
+drop table mpc.acs_zcta_200;
 
-create table acs_zcta_200 (
+create table mpc.acs_zcta_200 (
   FILEID VARCHAR2(6),
   STUSAB VARCHAR2(2),
   SUMLEVEL VARCHAR2(3),
@@ -92,11 +98,11 @@ create table acs_zcta_200 (
       LOGRECNO position (14-7) char(7) NULLIF LOGRECNO = '.'
     )
   )
-  location ('ge.00_file.dat.gz')
+  location ('acs_20135a_zcta_860.dat.gz')
 )
 ;
 
-select * from ACS_ZCTA_200
+select * from mpc.ACS_ZCTA_200
 ;
 
 
@@ -111,7 +117,7 @@ select zcta5, UHD001 dollars
        when UHD001 < 74000 then 59000
        else                     74000
        end dollar_group
-from acs_zcta_2
+from mpc.acs_zcta_2
 ;
 
 
