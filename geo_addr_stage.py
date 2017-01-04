@@ -293,6 +293,10 @@ if __name__ == '__main__':
             logging.basicConfig(
                 level=logging.DEBUG if '--debug' in argv else logging.INFO,
                 format=format, datefmt=datefmt)
+
+            # ack http://stackoverflow.com/a/15803435
+            environ["NLS_LANG"] = ".AL32UTF8"
+
             db_url = environ[db_label]
             return create_engine(db_url).connect().connection
 
