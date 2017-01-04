@@ -290,8 +290,9 @@ if __name__ == '__main__':
         from sqlalchemy import create_engine
 
         def connect(db_label, format, datefmt):
-            logging.basicConfig(level=logging.INFO,
-                                format=format, datefmt=datefmt)
+            logging.basicConfig(
+                level=logging.DEBUG if '--debug' in argv else logging.INFO,
+                format=format, datefmt=datefmt)
             db_url = environ[db_label]
             return create_engine(db_url).connect().connection
 
