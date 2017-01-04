@@ -42,6 +42,27 @@ from textwrap import dedent
 
 import pandas as pd
 
+MAX_COLUMNS = 768  # nicely splits columns into 6 groups
+
+GRANULARITIES = ['urb_area_400', 'county_050', 'cty_sub_060',
+                 'zcta_860', 'place_070', 'blck_grp_150', 'tract_140']
+# Note we're skipping acs_20135b, cph_2010_sf1a, and cph_2010_sf1b
+DIR = 'acs_20135a'
+
+
+def main(argv, cwd):
+    [field_index_fn, out_fn] = argv[1:3]
+
+    fields = pd.read_csv((cwd / field_index_fn).open('rb'))
+
+    with (cwd / out_fn).open('wb') as out:
+        for granularity in GRANULARITIES:
+            for g_ix, grp in field_groups(fields, max_columns=MAX_COLUMNS):
+                name = '%s_%s' % (DIR, granularity)
+                dat_fn = name + '.dat.gz'
+                out.write(table_def('MPC.%s_%d' % (name, g_ix), dat_fn, grp))
+                out.write(';\n\n')
+
 
 def column_def(field):
     dty = (
@@ -89,3 +110,31 @@ def table_def(name, location, fields,
     ''').strip().format(
         name=name, coldefs=coldefs, field_list=field_list, location=location,
         data_dir=data_dir, tools_dir=tools_dir)
+
+
+def field_groups(all_fields,
+                 last_key='NAME', max_columns=1000):
+    n_keys = all_fields[all_fields.variable_code == last_key].index.values[0]
+    group = all_fields[:n_keys]
+    g_ix = 0
+    for table_code in all_fields.table_source_code[n_keys + 1:].unique():
+        # print '========', table_code
+        table_fields = all_fields[all_fields.table_source_code == table_code]
+        # print table_fields.index
+        if len(group) + len(table_fields) > max_columns:
+            yield g_ix, group
+            g_ix += 1
+            group = all_fields[:n_keys]
+        group = group.append(table_fields)
+    if len(group) > n_keys:
+        yield g_ix, group
+
+
+if __name__ == '__main__':
+    def _script():
+        from sys import argv
+        from pathlib2 import Path
+
+        main(argv, cwd=Path('.'))
+
+    _script()
