@@ -283,16 +283,17 @@ def UnicodeDictReader(str_data, encoding, **kwargs):
 if __name__ == '__main__':
     def _script():
         from io import open as io_open
+        from os import environ
         from os.path import join as path_join
         from sys import argv
 
-        def connect(db_label, format, datefmt):
-            import sqlite3
+        from sqlalchemy import create_engine
 
+        def connect(db_label, format, datefmt):
             logging.basicConfig(level=logging.INFO,
                                 format=format, datefmt=datefmt)
-            # TODO: connect to Oracle
-            return sqlite3.connect(db_label)
+            db_url = environ[db_label]
+            return create_engine(db_url)
 
         main(argv,
              cwd=Path('.', (io_open, path_join)),
