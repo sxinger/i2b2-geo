@@ -1,79 +1,95 @@
 /*****************************************/
-/*merge with patient_dimension           */
-/*ETL                                    */
+/*ETL to i2b2 observation_fact           */
 /*****************************************/
 
 /* ==================================================================
- * Separate "cnt" (count) variables from "num" (numerical) variables
+ * Anonymize "num" (numeric) variables
+ * - e.g. 78000 -> 70000 - 80000
  * ==================================================================
  */
-create table geo_num_tbl as
-select am.patient_num
-      ,(g.ACS_VAR || ':' || g.ACS_VAL) concept_cd
-      ,meta.TABLE_ID instance_num
-      ,null nval_num
-from address_mapped am
-join geo_dimension g
-on (am.FIPS11 || '-' || am.ZIP) = g.GEO_ID and
-   g.ACS_VAR = 'RUCA'
-union all
-select am.patient_num
-      ,('ACS|' || meta.TABLE_ID || ':' || g.ACS_VAR) concept_cd
-      ,meta.TABLE_ID instance_num
-      ,g.ACS_VAL nval_num
-from address_mapped am
-join geo_dimension g
-on (am.FIPS11 || '-' || am.ZIP) = g.GEO_ID
+
+create or replace view geo_num_v as
+select g.GEO_ID
+      ,meta.GEO_LEVEL
+      ,meta.TABLE_ID
+      ,g.ACS_VAR
+      ,((floor(g.ACS_VAL/power(10,length(g.ACS_VAL)-1))-0.5)*power(10,length(g.ACS_VAL)) || '-' || (ceil(g.ACS_VAL/power(10,length(g.ACS_VAL)-1))+0.5)*power(10,length(g.ACS_VAL))) tval_char
+from geo_dimension g
 join acs_metadata meta
 on (meta.VARIABLE_CODE || '_' || meta.GEO_LEVEL) = g.ACS_VAR and
     meta.SUMMARY_TYPE='num'
 ;
 
-create table geo_cnt_tbl as
-select am.patient_num
-      ,('ACS|' || meta.TABLE_ID || ':' || g.ACS_VAR) concept_cd
-      ,meta.TABLE_ID instance_num
-      ,g.ACS_VAL nval_num
-      ,g.GEO_ID
-from address_mapped am
-join geo_dimension g
-on (am.FIPS11 || '-' || am.ZIP) = g.GEO_ID
+/* ===========================================================
+ * Anonymize "cnt" (count) variables
+ * Calculate percentage range for "cnt" (count) ACS variables
+ * ===========================================================
+ */
+create or replace view geo_cnt_v as
+select g.GEO_ID
+      ,meta.GEO_LEVEL
+      ,meta.TABLE_ID
+      ,g.ACS_VAR
+      ,g.ACS_VAL
+      ,((floor(g.ACS_VAL/power(10,length(g.ACS_VAL)-1))-0.5)*power(10,length(g.ACS_VAL)) || '-' || (ceil(g.ACS_VAL/power(10,length(g.ACS_VAL)-1))+0.5)*power(10,length(g.ACS_VAL))) tval_char
+      ,meta.LINE
+from geo_dimension g
 join acs_metadata meta
 on (meta.VARIABLE_CODE || '_' || meta.GEO_LEVEL) = g.ACS_VAR and
     meta.SUMMARY_TYPE='cnt'
 ;
 
-/* ===========================================================
- * Calculate percentage range for "cnt" (count) ACS variables
- * ===========================================================
- */
-create table geo_cnt_perc_tbl as                   
-select am.patient_num
-      ,('ACS|' || meta.TABLE_ID || ':' || g.ACS_VAR) concept_cd
-      ,'%' units_cd
-      ,meta.TABLE_ID instance_num
-      ,(floor(round(n.ACS_VAR/d.ACS_VAL*100)/10)*10 || '-' || ceil(round(n.ACS_VAR/d.ACS_VAL*100)/10)*10) tval_char -- convert to percentage range
-from address_mapped am
-join geo_dimension n 
-on (am.FIPS11 || '-' || am.ZIP) = n.GEO_ID
-join geo_cnt_tbl d
-on n.GEO_ID = d.GEO_ID and d.LINE=1 and
-   regexp(n.ACS_VAR,'[^_]',1,1) = regexp(d.ACS_VAR,'[^_]',1,1)
+create or replace view geo_cnt_perc_v as                   
+select g.GEO_ID
+      ,g.GEO_LEVEL
+      ,g.TABLE_ID
+      ,g.ACS_VAR
+      ,g.LINE
+      ,case when g.ACS_VAL = d.ACS_VAL then '100'
+            else (floor(round(g.ACS_VAL/d.ACS_VAL*100)/10)*10 || '-' || ceil(round(g.ACS_VAL/d.ACS_VAL*100)/10)*10) 
+       end as tval_char -- convert to percentage range
+from geo_cnt_v g
+join geo_cnt_v d
+on g.GEO_ID = d.GEO_ID and d.LINE=1 and
+   g.TABLE_ID = d.TABLE_ID and
+   g.GEO_LEVEL = d.GEO_LEVEL
 ;
 
-
-/* ====================================
- * Create the observation_fact_geo view
- * ====================================
+/* =====================================
+ * Create the observation_fact_geo table
+ * =====================================
  */
-create or replace view observation_fact_geo as
-select 
-    gn.*,
-    mod(gn.pat_enc_csn_id, &&heron_etl_chunks)+1 as part
-from geo_dimension gn
-union 
-select 
-    gn.*,
-    mod(gn.pat_enc_csn_id, &&heron_etl_chunks)+1 as part
-from geo_dimension gn
-;
+create table observation_fact_geo (
+    patient_num integer,
+    concept_cd varchar(40),
+    tval_char varchar(8),
+    modifier_cd varchar(8)
+);
+
+insert into observation_fact_geo (
+    select pat.patient_num,(geo.ACS_VAR || ':' || geo.ACS_VAL),'@','@'
+    from geo_dimension geo
+    join patient_dimension pat  -- add geo_id to patient_dimension@id
+    on pat.geo_id = geo.geo_id
+    where geo.ACS_VAR = 'RUCA'
+);
+commit;
+
+insert into observation_fact_geo (
+    select pat.patient_num,('ACS|' || geo.TABLE_ID || ':' || geo.ACS_VAR)
+          ,geo.tval_char,('GEO_LEVEL:' || geo.GEO_LEVEL)
+    from geo_num_v geo
+    join patient_dimension pat  -- add geo_id to patient_dimension@id
+    on pat.geo_id = geo.geo_id
+);
+commit;
+
+insert into observation_fact_geo (
+    select pat.patient_num,('ACS|' || geo.TABLE_ID || ':' || geo.ACS_VAR)
+          ,(geo.tval_char || '%'),('GEO_LEVEL:' || geo.GEO_LEVEL)
+    from geo_cnt_perc_v geo
+    join patient_dimension pat  -- add geo_id to patient_dimension@id
+    on pat.geo_id = geo.geo_id
+    where geo.LINE <> 1
+);
+commit;
