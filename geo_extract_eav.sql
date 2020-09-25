@@ -3,20 +3,34 @@
 /*Staging                                */
 /*****************************************/
 
-/*assumption 1: addresses have all been geocoded*/
-select * from address_mapped;
+whenever sqlerror continue;
+drop table acs_metadata;
+drop table geo_dimension;
+whenever sqlerror exit;
 
-/*assumption 2: acs tables have been profiled and uploaded*/
---drop table ACS_meta; --if need to be updated
-select * from ACS_meta;
+/*assumption 1: new addresses have been geocoded and added to address_mapped
+*/
+select * from address_mapped where 1 = 0;
 
-/*assumption 3: RUCA mapping have been uploaded (census tract)*/
---drop table ruca_map; --if need to be updated
-select * from ruca_map;
+/*assumption 2: the metadata table for the staged ACS schemas/tables is available
+*/
+select * from mpc.acs_fields where 1 = 0;
 
+/*assumption 3: acs tables have been profiled and uploaded
+  -- generated using get_ACS_ont.R 
+  -- a reusable mapping is saved in ./curated_data
+*/
+--drop table acs_meta; --if need to be updated
+select * from acs_meta where 1 = 0;
+
+/*assumption 4: RUCA mapping have been uploaded (census tract)
+  uploaded from external data source: 
+  -- https://www.ers.usda.gov/webdocs/DataFiles/53241/ruca2010revised.xlsx?v=7723.7
+  -- downloaded and saved in ./curated_data
+*/
+select * from ruca_map where 1 = 0;
 
 /*Step 1: collect and select acs table/variable of interests and link to staged ACS tables*/
-drop table acs_metadata purge;
 create table acs_metadata as
 select atc.TABLE_NAME,
        case when atc.TABLE_NAME like '%COUNTY%' then 'c'
@@ -47,22 +61,28 @@ on atc.COLUMN_NAME = acs.VARIABLE_CODE
 join ACS_meta meta
 on acs.TABLE_SOURCE_CODE = meta.TABLE_ID and
    acs.VARIABLE_SEQUENCE = meta.LINE and
-   -- subject selection
-   (meta.TABLE_SUBJECT in ('15','17','23','27') or 
-    (meta.TABLE_SUBJECT in ('19','20') and meta.SUMMARY_TYPE= 'num')) and
-   (atc.TABLE_NAME like '%COUNTY%' or
-    atc.TABLE_NAME like '%ZCTA%' or
-    atc.TABLE_NAME like '%TRACT%')
+   -- subject pre-selection
+   (
+    (meta.TABLE_SUBJECT in ('15','17') and SEX='NI' and RACE='NI' and ETHNICITY='NI' and AGE='NI') -- education, poverty
+    or 
+    (meta.TABLE_SUBJECT in ('19') and meta.SUMMARY_TYPE= 'num') -- income
+    ) 
+    and
+   (
+    atc.TABLE_NAME like '%ZCTA%' -- ZCTA level
+    or
+    atc.TABLE_NAME like '%TRACT%' -- census tract level
+    )
+    and
+    meta.VARIABLE_LABEL not like '%AGGREGATE%' -- remove geographical-level aggregates
 ;
 
-select TABLE_SUBJECT, SUBJECTNAME, count(*) from acs_metadata
-group by TABLE_SUBJECT, SUBJECTNAME;
+--select TABLE_SUBJECT, SUBJECTNAME, count(*) from acs_metadata
+--group by TABLE_SUBJECT, SUBJECTNAME;
 
-select * from acs_metadata;
 
 /*Step 2: collect RUCA, ACS variables*/
 -- initialize geo_dimension
-drop table geo_dimension purge;
 create table geo_dimension (
  GEO_ID   varchar2(200),
  ACS_VAR  varchar2(50),
@@ -135,15 +155,16 @@ begin
 end;
 -- 2,686 seconds
 
-select count(distinct geo_id) from geo_dimension;
---39,236
+--select count(distinct geo_id) from geo_dimension;
+----39,236
+--
+--select count(*) from geo_dimension; 
+---- 12,174,157
+--
+---- check for duplicates
+--select geo_id, acs_var, count(*)
+--from geo_dimension
+--group by geo_id, acs_var
+--having count(*) > 1;
 
-select count(*) from geo_dimension; 
--- 31,684,783
-
--- check for duplicates
-select geo_id, acs_var, count(*)
-from geo_dimension
-group by geo_id, acs_var
-having count(*) > 1;
 
