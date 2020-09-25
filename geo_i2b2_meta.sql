@@ -1,25 +1,14 @@
 /*****************************************/
-/*map ACS concepst to i2b2 metadata      */
+/*construct a geo_dimension in EAV format*/
+/*i2b2 metadata                          */
 /*****************************************/
 
+select * from acs_metadata;
+select * from ruca_map;
+
 /*ACS ontology*/
-insert into blueHeronMetadata.heron_terms (
-  c_hlevel
-, c_fullname
-, c_name
-, c_synonym_cd
-, c_visualattributes
-, c_basecode
-, c_facttablecolumn
-, c_tablename
-, c_columnname
-, c_columndatatype -- TODO
-, c_operator -- TODO?
-, c_dimcode
-, m_applied_path
-, update_date
-, term_id
-)
+drop table heron_terms_geo purge;
+create table heron_terms_geo as
 select
   c_hlevel
 , '\i2b2\Demographics\' || path c_fullname
@@ -35,9 +24,9 @@ select
 , coalesce(c_basecode, '@') c_dimcode
 , '@' m_applied_path
 , sysdate update_date
-, ora_hash(path)
+--, ora_hash(path)
 from (
-
+------------- RUCA codes ---------------
 select 2 c_hlevel
      , 'FA' c_visualattributes
      , null c_basecode
@@ -64,28 +53,30 @@ select 3 c_hlevel
             else 'undefined'
        end as c_name
      , ('RUCA\' || ruca1 || '\') path
-from ruca_map_cur
+from ruca_map
 group by ruca1
 
 union all
 
+------------- ACS subjects (selective) ---------------
 select 2 c_hlevel
      , 'FA' c_visualattributes
      , null c_basecode
      , ('ACS subject about' || SUBJECTGRP || ':' || SUBJECTNAME) c_name
      , (SUBJECTGRP || '-' || SUBJECTNAME || '\') path
-from acs_meta
+from acs_metadata
 group by SUBJECTGRP, SUBJECTNAME
 
 union all
 
-select distinct
-       HLEVEL+2 c_hlevel
+select HLEVEL+2 c_hlevel
       ,NODE_POS c_visualattributes
-      ,('ACS|' || TABLE_ID || ':' || VARIABLE_CODE) c_basecode
+      ,('ACS|' || TABLE_ID || ':' || VARIABLE_CODE || '_' ||GEO_LEVEL) c_basecode
       ,VARIABLE_LABEL c_name
       ,(SUBJECTGRP || '-' || SUBJECTNAME || '\' || VARIABLE_LABEL) path
 from acs_metadata
 )
 ;
+
+--select * from heron_terms_geo;
 
